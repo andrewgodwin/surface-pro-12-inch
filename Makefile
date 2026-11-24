@@ -16,16 +16,19 @@ FILES := \
 
 LEGACY := $(GRUBD)/zz-local.cfg $(UDEVD)/90-no-lid-wake.rules \
 	$(DRACUTD)/99-surface-luks-convert.conf $(DESTDIR)/usr/local/sbin/surface-luks-convert \
-	$(GRUBD)/zz-surface-splash.cfg
+	$(GRUBD)/zz-surface-splash.cfg \
+	$(DESTDIR)/lib/firmware/qcom/x1e80100/X1P42100-Microsoft-Surface-Pro-12in-tplg.bin
 
 .PHONY: install uninstall apply initrd user user-uninstall
 
 install:
 	@for f in $(FILES); do install -Dm644 $${f%%:*} $${f#*:}; echo "$${f#*:}"; done
 	rm -f $(LEGACY)
+	DESTDIR=$(DESTDIR) sh wifi/fixwifi.sh
 	@[ -n "$(DESTDIR)" ] || $(MAKE) --no-print-directory apply
 
 uninstall:
+	rm -fv $(DESTDIR)/lib/firmware/ath12k/WCN7850/hw2.0/board.bin
 	@for f in $(FILES); do rm -fv $${f#*:}; done
 	@[ -n "$(DESTDIR)" ] || $(MAKE) --no-print-directory apply
 
