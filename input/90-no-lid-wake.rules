@@ -1,0 +1,3 @@
+# switch-lid (TLMM gpio2, dual-edge via PDC) spuriously wakes from CX collapse.
+# Match bind: gpio_keys probe re-enables wakeup after add.
+ACTION=="add|bind", SUBSYSTEM=="platform", KERNEL=="gpio-keys", ATTR{power/wakeup}="disabled"
