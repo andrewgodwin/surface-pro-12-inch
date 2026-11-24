@@ -6,7 +6,7 @@ These are based on the Ubuntu 26.10 Concept images. This repo is a bit of a mess
 
 To get the machine booting in the first place, you need the device tree, which I have a copy of in here, sourced from harrisonvanderbyl's `surface-pro-12-inch-linux` repo. (For a live USB that doesn't have it already, that means some GRUB editing before USB boot, and chrooting into the fresh system to install it before its first boot)
 
-Also, 
+There was a bunch of kernel args and defaults in the Ubuntu X1E Concept images that I just didn't seem to need as well; further testing might be needed to verify that.
 
 | Dir | Fix |
 |---|---|
