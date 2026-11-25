@@ -2,6 +2,7 @@ DESTDIR ?=
 GRUBD   := $(DESTDIR)/etc/default/grub.d
 MODLD   := $(DESTDIR)/etc/modules-load.d
 UDEVD   := $(DESTDIR)/etc/udev/rules.d
+HWDBD   := $(DESTDIR)/etc/udev/hwdb.d
 DRACUTD := $(DESTDIR)/etc/dracut.conf.d
 PWD_USER := $(HOME)/.config/pipewire/pipewire.conf.d
 
@@ -10,6 +11,7 @@ FILES := \
 	cpufreq/grub.cfg:$(GRUBD)/zz-surface-cpufreq.cfg \
 	pm/grub.cfg:$(GRUBD)/zz-surface-pm.cfg \
 	input/90-no-lid-wake.rules:$(UDEVD)/90-surface-no-lid-wake.rules \
+	input/61-type-cover-fn.hwdb:$(HWDBD)/61-surface-type-cover-fn.hwdb \
 	luks/dracut.conf:$(DRACUTD)/50-surface-luks.conf \
 	firmware/dracut.conf:$(DRACUTD)/surface-pro-12-firmware.conf \
 	luks/grub.cfg:$(GRUBD)/zz-surface-luks.cfg
@@ -34,8 +36,10 @@ uninstall:
 
 apply: initrd
 	update-grub
+	systemd-hwdb update
 	udevadm control --reload
 	udevadm trigger --action=bind --subsystem-match=platform --sysname-match=gpio-keys || true
+	udevadm trigger --action=change --subsystem-match=input || true
 	modprobe scmi-cpufreq || true
 
 initrd:

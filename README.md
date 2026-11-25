@@ -13,7 +13,7 @@ There was a bunch of kernel args and defaults in the Ubuntu X1E Concept images t
 | `boot/` | Device tree (needed if your distro does not bundle it) |
 | `cpufreq/` | Autoload `scmi-cpufreq` (no modalias); `schedutil` default. |
 | `pm/` | Removes some default args that aren't needed and fixes up some other power management |
-| `input/` | Disables `gpio-keys` wakeup (the lid switch goes off randomly), making it only the power key |
+| `input/` | Disables `gpio-keys` wakeup (the lid switch goes off randomly), making it only the power key; remaps type cover Fn from `BTN_0` (which libinput treats as a held mouse button, breaking clicks) to `KEY_FN` |
 | `luks/` | Ensure the SAM/HID modules are in the initrd for LUKS unlocking |
 | `firmware/` | Extracts DSP firmware from a non-BitLocker windows partition |
 | `wifi/` | Fixes the `17cb:3378` entry in `ath12k`'s `board-2.bin` |

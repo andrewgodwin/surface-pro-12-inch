@@ -1,0 +1,6 @@
+# Type cover Fn sends HID GenericDesktop.SystemFunctionShift (0x10097), which
+# hid-input maps to BTN_0. libinput treats that as a pointer button, so holding
+# Fn (or a lost Fn release) makes KWin think a mouse button is held and swallows
+# clicks. Remap it to KEY_FN, a plain keyboard key.
+evdev:input:b0019v045Ep09D6*
+ KEYBOARD_KEY_10097=fn
