@@ -1,0 +1,79 @@
+#!/bin/sh
+# kernel-install plugin: build a UKI with a patched SP12 DTB, plus a
+# GRUB BLS entry for it, and make that entry the default.
+#
+# Why: Fedora's DTB ships iris (video-codec@aa00000) as status = "disabled".
+# Fedora's kernel-uki-dtbloader systemd-stub replaces any GRUB-loaded DT with
+# its .dtbauto copy, so the patched DTB has to be embedded (as a fixed .dtb)
+# in our own UKI. Unsigned: Secure Boot is off (see NOTES.md).
+# Fedora's own entries stay untouched as the fallback.
+#
+# Runs after 50-dracut (initrd) and 95-set-boot-entry (so our default wins).
+set -eu
+COMMAND=$1
+VER=$2
+DTB=qcom/x1p42100-microsoft-sp12in.dtb
+IRIS=/soc@0/video-codec@aa00000
+IRIS_FW=qcom/x1p42100/Microsoft/Surface12/qcvss8380_pa.mbn
+UKI=/boot/vmlinuz-$VER-surface.efi
+ENTRIES=/boot/loader/entries
+MID=$(cat /etc/machine-id)
+ENTRY=$ENTRIES/$MID-$VER-surface.conf
+
+case "$COMMAND" in
+remove)
+	rm -f "$UKI" "$ENTRY"
+	exit 0
+	;;
+add) ;;
+*) exit 0 ;;
+esac
+
+SRC=/boot/vmlinuz-$VER
+FEDORA_ENTRY=$ENTRIES/$MID-$VER.conf
+[ -f "$SRC" ] && [ -f "$FEDORA_ENTRY" ] || { echo "96-surface-uki: no $SRC or $FEDORA_ENTRY, skipping" >&2; exit 0; }
+
+# This kernel's DTB, or the newest kernel's if it doesn't ship one (7.2).
+DTBSRC=/boot/dtb-$VER/$DTB
+[ -f "$DTBSRC" ] || DTBSRC=$(ls -d /boot/dtb-*/$DTB 2>/dev/null | sort -V | tail -1)
+[ -n "$DTBSRC" ] || { echo "96-surface-uki: no $DTB anywhere, skipping" >&2; exit 0; }
+
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+
+cp "$DTBSRC" "$T/sp12.dtb"
+fdtput -t s "$T/sp12.dtb" "$IRIS" status okay
+fdtput -t s "$T/sp12.dtb" "$IRIS" firmware-name "$IRIS_FW"
+
+# Fedora's UKI wraps the plain EFI kernel in .linux; a plain kernel-core
+# vmlinuz has no .linux and is used as is. Keep Fedora's kernel SBAT lines;
+# ukify adds systemd-stub's from its own stub.
+if objdump -h "$SRC" | grep -q ' \.linux '; then
+	objcopy -O binary --only-section=.linux "$SRC" "$T/linux"
+	objcopy -O binary --only-section=.sbat "$SRC" "$T/sbat.all"
+	grep -v -E '^(sbat|systemd-stub)' "$T/sbat.all" >"$T/sbat" || true
+else
+	cp "$SRC" "$T/linux"
+	: >"$T/sbat"
+fi
+
+set -- --linux "$T/linux" --devicetree "$T/sp12.dtb" --uname "$VER" \
+	--os-release @/etc/os-release \
+	--output "$T/uki.efi"
+[ -s "$T/sbat" ] && set -- "$@" --sbat "@$T/sbat"
+ukify build "$@" >/dev/null
+install -m755 "$T/uki.efi" "$UKI"
+
+# Same as Fedora's entry (options, initrd) apart from title/version/linux.
+sed -e 's/^title \(.*\)$/title \1 (Surface)/' \
+	-e "s|^version .*|version $VER-surface|" \
+	-e "s|^linux .*|linux /vmlinuz-$VER-surface.efi|" \
+	-e '/^devicetree[[:space:]]/d' \
+	"$FEDORA_ENTRY" >"$T/entry"
+install -m644 "$T/entry" "$ENTRY"
+command -v restorecon >/dev/null && restorecon "$UKI" "$ENTRY" || true
+echo "96-surface-uki: $UKI, $ENTRY"
+if [ "$(ls /lib/modules | sort -V | tail -1)" = "$VER" ]; then
+	grub2-set-default "$MID-$VER-surface"
+	echo "96-surface-uki: default -> $MID-$VER-surface"
+fi

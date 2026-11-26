@@ -3,7 +3,7 @@
 # Usage: sudo firmware/extract-windows.sh [/dev/sda3]   (then: sudo make initrd)
 set -eu
 DEV=${1:-/dev/sda3}
-D=${DESTDIR:-}/lib/firmware/qcom/x1p42100/Microsoft/Surface12
+D=${DESTDIR:-}/usr/lib/firmware/qcom/x1p42100/Microsoft/Surface12
 M=$(mktemp -d)
 trap 'umount "$M" 2>/dev/null; rmdir "$M"' EXIT
 mount -o ro -t ntfs3 "$DEV" "$M"
