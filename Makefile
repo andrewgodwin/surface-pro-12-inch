@@ -17,7 +17,8 @@ FILES := \
 	input/61-type-cover-fn.hwdb:$(HWDBD)/61-surface-type-cover-fn.hwdb \
 	luks/dracut.conf:$(DRACUTD)/50-surface-luks.conf \
 	firmware/dracut.conf:$(DRACUTD)/surface-pro-12-firmware.conf \
-	plymouth/plymouthd.conf:$(PLYD)/plymouthd.conf
+	plymouth/plymouthd.conf:$(PLYD)/plymouthd.conf \
+	boot/dracut-no-rescue.conf:$(DRACUTD)/90-surface-no-rescue.conf
 
 .PHONY: install uninstall apply initrd firmware user user-uninstall
 

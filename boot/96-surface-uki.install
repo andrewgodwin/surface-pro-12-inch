@@ -5,14 +5,17 @@
 # Why: Fedora's DTB ships iris (video-codec@aa00000) as status = "disabled".
 # Fedora's kernel-uki-dtbloader systemd-stub replaces any GRUB-loaded DT with
 # its .dtbauto copy, so the patched DTB has to be embedded (as a fixed .dtb)
-# in our own UKI. Unsigned: Secure Boot is off (see NOTES.md).
+# in our own UKI. Unsigned: Secure Boot is off (see README.md).
 # Fedora's own entries stay untouched as the fallback.
 #
 # Runs after 50-dracut (initrd) and 95-set-boot-entry (so our default wins).
 set -eu
 COMMAND=$1
 VER=$2
-DTB=qcom/x1p42100-microsoft-sp12in.dtb
+# DTBs are found by root compatible, not filename (which may change). Use
+# the running machine's most specific compatible, or ours if run elsewhere.
+COMPAT=$(tr '\0' '\n' </proc/device-tree/compatible 2>/dev/null | head -1 || true)
+[ -n "$COMPAT" ] || COMPAT=microsoft,surface-pro-12in
 IRIS=/soc@0/video-codec@aa00000
 IRIS_FW=qcom/x1p42100/Microsoft/Surface12/qcvss8380_pa.mbn
 UKI=/boot/vmlinuz-$VER-surface.efi
@@ -33,10 +36,40 @@ SRC=/boot/vmlinuz-$VER
 FEDORA_ENTRY=$ENTRIES/$MID-$VER.conf
 [ -f "$SRC" ] && [ -f "$FEDORA_ENTRY" ] || { echo "96-surface-uki: no $SRC or $FEDORA_ENTRY, skipping" >&2; exit 0; }
 
+# DTBs under $1 whose root compatible list contains $COMPAT exactly
+# (grep narrows ~1600 files to candidates; fdtget confirms).
+ours() {
+	grep -rlaF --include='*.dtb' "$COMPAT" "$1" 2>/dev/null | while read -r f; do
+		fdtget -t s "$f" / compatible 2>/dev/null | tr ' ' '\n' | grep -qxF "$COMPAT" && echo "$f" || true
+	done
+}
+# First of a list, preferring a plain DTB over a -el2 (Linux-at-EL2) one.
+pick() {
+	l=$(cat)
+	p=$(echo "$l" | grep -v -- '-el2\.dtb$' || true)
+	echo "${p:-$l}" | head -1
+}
+
+# Save /boot space (it's 1 GB): drop every other board's DTB from this
+# kernel's /boot/dtb-<ver>. Nothing reads them: both UKIs carry their own
+# DTBs. Only prune when ours was found, so a compatible change can't empty it.
+D=/boot/dtb-$VER
+KEEP=$(ours "$D")
+if [ -n "$KEEP" ]; then
+	find "$D" -type f \( -name '*.dtb' -o -name '*.dtbo' \) | grep -vxF "$KEEP" | xargs -r rm -f
+	find "$D" -mindepth 1 -type d -empty -delete
+fi
+
 # This kernel's DTB, or the newest kernel's if it doesn't ship one (7.2).
-DTBSRC=/boot/dtb-$VER/$DTB
-[ -f "$DTBSRC" ] || DTBSRC=$(ls -d /boot/dtb-*/$DTB 2>/dev/null | sort -V | tail -1)
-[ -n "$DTBSRC" ] || { echo "96-surface-uki: no $DTB anywhere, skipping" >&2; exit 0; }
+DTBSRC=$(echo "$KEEP" | pick)
+if [ -z "$DTBSRC" ]; then
+	for d in $(ls -d /boot/dtb-* 2>/dev/null | sort -rV); do
+		DTBSRC=$(ours "$d" | pick)
+		[ -n "$DTBSRC" ] && break
+	done
+fi
+[ -n "$DTBSRC" ] || { echo "96-surface-uki: no DTB with compatible $COMPAT anywhere, skipping" >&2; exit 0; }
+echo "96-surface-uki: DTB $DTBSRC"
 
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
