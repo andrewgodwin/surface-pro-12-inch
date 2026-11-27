@@ -15,8 +15,12 @@ set -eu
 PLUGIN=/etc/kernel/install.d/96-surface-uki.install
 # Force icc sync_state past driverless consumers (1dfa000.crypto: no QCE
 # driver; 3d6a000.gmu: never bound) that otherwise pin interconnect votes at
-# INT_MAX and block CX/DDR collapse in suspend.
-KARGS="fw_devlink.sync_state=timeout"
+# INT_MAX and block CX/DDR collapse in suspend. The timeout is the deferred
+# probe timeout, which Fedora's kernel defaults to -1 (never), so set it; it
+# restarts on every module load, so 30 s is counted from the last one.
+# Firmware advertises a TPM2 Linux has no driver for here, so systemd waits
+# ~45 s for /dev/tpm0 + /dev/tpmrm0, in the initrd and again after switch-root.
+KARGS="fw_devlink.sync_state=timeout deferred_probe_timeout=30 systemd.tpm2_wait=0"
 CFG=/etc/default/grub
 
 set_var() {  # set_var NAME VALUE

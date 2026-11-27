@@ -45,6 +45,34 @@ cp "$DTBSRC" "$T/sp12.dtb"
 fdtput -t s "$T/sp12.dtb" "$IRIS" status okay
 fdtput -t s "$T/sp12.dtb" "$IRIS" firmware-name "$IRIS_FW"
 
+# Lid: TLMM gpio2's dual-edge IRQ (via PDC) never fires on the falling edge
+# (lid closing), so gpio-keys never reports a close. Move the switch into a
+# gpio-keys-polled node instead (polled devices can't wake).
+# LID_WAKE=1: also keep the IRQ switch-lid in gpio-keys, whose working rising
+# edge (lid open; DT has wakeup-event-action = deasserted) wakes from suspend.
+LID_WAKE=1
+LID=/gpio-keys/switch-lid
+if LIDGPIO=$(fdtget -t x "$T/sp12.dtb" $LID gpios 2>/dev/null); then
+	P=/gpio-keys-lid
+	if [ "$LID_WAKE" = 1 ]; then
+		# Wake source only: as an SW_LID it would never report closed,
+		# and upowerd (so KDE) watches just one lid device and may pick
+		# it. The input core drops KEY_RESERVED, so it emits nothing.
+		fdtput -t u "$T/sp12.dtb" $LID linux,input-type 1   # EV_KEY
+		fdtput -t u "$T/sp12.dtb" $LID linux,code 0         # KEY_RESERVED
+	else
+		fdtput -r "$T/sp12.dtb" $LID
+	fi
+	fdtput -p -c "$T/sp12.dtb" $P/switch-lid
+	fdtput -t s "$T/sp12.dtb" $P compatible gpio-keys-polled
+	fdtput -t s "$T/sp12.dtb" $P label "Lid Switch"
+	fdtput -t u "$T/sp12.dtb" $P poll-interval 200
+	fdtput -t s "$T/sp12.dtb" $P/switch-lid label "Lid"
+	fdtput -t u "$T/sp12.dtb" $P/switch-lid linux,input-type 5   # EV_SW
+	fdtput -t u "$T/sp12.dtb" $P/switch-lid linux,code 0         # SW_LID
+	fdtput -t x "$T/sp12.dtb" $P/switch-lid gpios $LIDGPIO
+fi
+
 # Fedora's UKI wraps the plain EFI kernel in .linux; a plain kernel-core
 # vmlinuz has no .linux and is used as is. Keep Fedora's kernel SBAT lines;
 # ukify adds systemd-stub's from its own stub.

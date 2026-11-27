@@ -31,11 +31,29 @@ Hardware facts and open issues, carried over from the Ubuntu 26.10 Concept insta
   - `1dfa000.crypto`: Fedora doesn't build `CRYPTO_DEV_QCE` either.
   - `3d6a000.gmu`: never bound.
   - Hence `fw_devlink.sync_state=timeout`.
-  - **TODO:** check the boot log for `sync_state() pending`, and whether `/sys/kernel/debug/qcom_stats/cxsd` increments across a suspend.
+  - On Fedora, `fw_devlink.sync_state=timeout` alone did nothing. Fedora's kernel has `driver_deferred_probe_timeout = -1` (read from `/proc/kcore`), so the timeout never fires. There was no "Forcing sync_state()" message, and `state_synced` stayed 0 on gcc, gpucc, `1700000.interconnect` and `interconnect-1`.
+  - The interconnect summary showed INT_MAX votes, and a suspend (2026-11-25) left cxsd/ddr/aosd counts at 0. Hence `deferred_probe_timeout=30`.
+  - Verified 2026-11-25: all four providers get "Timed out. Forcing sync_state()" at ~51 s and `state_synced` = 1, with no INT_MAX votes left and nothing broken. A 67 s suspend then gave cxsd/ddr 686 entries, ~62 s in DDR collapse (19.2 MHz ticks), with aosd counting too.
+- RTC (`rtc-pm8xxx`) has no `wakealarm`, so `rtcwake` can't be used for suspend tests; wake with the power button.
 - Lid switch:
-  - gpio-keys `switch-lid` (TLMM gpio2 via PDC) spuriously wakes from CX collapse, so wakeup is disabled (`input/90-no-lid-wake.rules`; needs `ACTION=="add|bind"`).
-  - Closing the lid raises no IRQ on the falling edge, so lid-close suspend doesn't work. This is a kernel issue.
-- Unexplained ~5 h wakes from suspend. Next step: `echo 1 > /sys/power/pm_debug_messages`, then look for `PM: Triggering wakeup from IRQ N`.
+  - On Ubuntu, gpio-keys `switch-lid` (TLMM gpio2 via PDC) seemed to spuriously wake from CX collapse, so wakeup was disabled with a udev rule. That rule is gone now (see below); the spurious wakes were probably the ~5 h firmware wakes.
+  - Closing the lid raises no IRQ on the falling edge, so lid-close suspend didn't work. This is a kernel issue, worked around below.
+  - Confirmed on Fedora 7.3 (2026-11-25) by sampling `/sys/kernel/debug/gpio`. The TLMM gpio2 level does follow the lid (high = open, low = closed). Closing the lid leaves IRQ 127 unchanged; opening it increments it. So the sensor works, and only the falling edge of the dual-edge IRQ (via PDC) is lost. gpio-keys only re-reads the pin on the rising edge, which reads as "open", so it never reports a close.
+  - Workaround (`96-surface-uki.install`): `switch-lid` is copied into a `gpio-keys-polled` node (`/gpio-keys-lid`, 200 ms poll) for the lid state.
+  - With `LID_WAKE=1`, the IRQ `switch-lid` stays in `gpio-keys` as a wake source only, as `EV_KEY`/`KEY_RESERVED`, which the input core drops. Upstream DT gives it `wakeup-event-action = EV_ACT_DEASSERTED`, so only lid open wakes, and that edge works. It mustn't stay SW_LID: it never reports closed, and `upowerd` (so KDE) watches only one lid device. It picked that one, and lid-close suspend broke.
+  - Verified overnight 2026-11-26: lid close → suspend, lid open → `Triggering wakeup from IRQ 173` (msmgpio 2). The lid IRQ fired once all night. If wake-on-open ever misbehaves, set `LID_WAKE=0` and run `sudo sh boot/setup-boot.sh install`.
+  - Gotcha: `/etc/udev/rules.d` is baked into the hostonly initrd, so removing a rule needs `dracut -f`.
+- Unexplained ~5 h wakes from suspend. On 2026-11-26 it woke after 18424 s with `pm_debug_messages` on: "Checking wakeup interrupts" but no `Triggering wakeup from IRQ`, so no Linux wake IRQ was pending. It's firmware or a timer below Linux, not the lid. KDE re-suspends 10 s later if the lid is still closed. `/etc/tmpfiles.d/surface-pm-debug.conf` (not in the repo) keeps `pm_debug_messages` on to catch more.
+
+## Boot splash
+- Plymouth draws on msm (not simpledrm, because of `UseSimpledrmNoLuks` with LUKS) at the native 2196x1464, and auto-picks scale 2, i.e. a 1098x732 logical canvas. Text is rendered at full resolution, but the spinner theme's bitmaps (watermark 149x43, 32x32 spinner, entry box) are upscaled, which looks blurry. There's no BGRT logo on this device.
+- Scale is integer-only, so `plymouth/plymouthd.conf` sets `DeviceScale=1`: sharp but small. A theme copy with larger fonts would help the text only. To debug: `plymouth.debug` on the cmdline, then read `/var/log/plymouth-debug.log`.
+
+## Boot time
+- 2026-11-25, before fixes: 1 s kernel + 46 s initrd + 63 s userspace = 1 min 50 s.
+  - The firmware advertises a TPM2, but there's no Linux TPM device ("ima: No TPM chip found"). systemd waits for `/dev/tpm0` and `/dev/tpmrm0` until the job timeout, in the initrd (~33 s after LUKS unlock) and again after switch-root (~45 s). Fix: `systemd.tpm2_wait=0` (also on Fedora's Snapdragon wiki page).
+  - iscsi-initiator-utils' NM dispatcher script `04-iscsi` runs `systemctl --no-block reload iscsi.service` on any interface up. That reload job is ordered after `network-online.target`, and `remote-fs.target` after `iscsi.service`, so `systemd-user-sessions` and the login screen waited ~16 s for Wi-Fi. Fix: mask `iscsi.service` (Makefile `MASK`).
+- Still left: NetworkManager starts Wi-Fi auto-activation about 15 s after it starts (no longer blocks login); `qcom_q6v5_pas 32300000.remoteproc: timeout waiting for subsystem event response` at about 11 s in the initrd (CDSP, in parallel).
 
 ## Known kernel/userspace bugs
 - Reloading ath12k (`modprobe -r ath12k_wifi7 ath12k; modprobe ath12k_wifi7`) oopses on 7.3.4 in `mhi_queue` ← `qcom_mhi_qrtr_send` (QMI work after unload). Reboot instead.
@@ -50,6 +68,6 @@ Hardware facts and open issues, carried over from the Ubuntu 26.10 Concept insta
 - The initrd and cmdline still come from GRUB, as with Fedora's UKI.
 
 ## Status on Fedora (2026-11-25, after reboot)
-- Working: boot from the Surface UKI (patched DTB), schedutil cpufreq, GPU acceleration (Adreno X1-45, GL accelerated), ADSP/CDSP, sound card and speakers (WSA884x), speaker boost (a smart filter in front of the speaker sink), Wi-Fi via `board.bin`, lid wakeup disabled, type cover at the LUKS prompt.
+- Working: boot from the Surface UKI (patched DTB), schedutil cpufreq, GPU acceleration (Adreno X1-45, GL accelerated), ADSP/CDSP, sound card and speakers (WSA884x), speaker boost (a smart filter in front of the speaker sink), Wi-Fi via `board.bin`, lid-close suspend and lid-open wake, type cover at the LUKS prompt.
 - Iris works when booted from the Surface UKI: `/dev/video0` and `/dev/video1` exist, and GStreamer v4l2h264enc → v4l2h264dec round-trips 720p correctly (300 frames decoded in about 0.6 s). It also offers H.265, VP9 and AV1 decoders.
-- Not verified: suspend/CX collapse with `fw_devlink.sync_state=timeout` (`/sys/kernel/debug/qcom_stats/cxsd` across a suspend).
+- Suspend: CX/DDR collapse works with `fw_devlink.sync_state=timeout deferred_probe_timeout=30`. Wake on the power button works (IRQ 193, `pmic_pwrkey`). The `i2c_hid_of 0-0016` resume error -6 is benign.
